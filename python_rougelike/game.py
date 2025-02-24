@@ -2,86 +2,64 @@ from __future__ import annotations
 
 import tcod.context
 from tcod.tileset import Tileset
-
-from python_rougelike.actions import MoveAction, QuitAction
+from python_rougelike.engine import Engine
 from python_rougelike.input_handlers import EventHandler
 from python_rougelike.settings import Settings
-
+from python_rougelike.world import World
 
 class Game:
 
-    def __init__(self) -> None:
-        self._vsync: bool = False
-        self._title: str = None
-        self._tileset: Tileset = None
-        self._height: int = None
-        self._width: int = None
-        self._settings: Settings = None
-        self._event_handler: EventHandler = None
+    def __init__(
+            self,
+            title: str,
+            tileset: Tileset,
+            rows: int,
+            cols: int,
+            settings: Settings,
+            vsync: bool = False
+    ) -> None:
+        """
+        Manages a game instance, including setting up tcod and resolving dependencies
+        Args:
+            title: the game title
+            tileset: a tcod tileset
+            rows: the number of console rows
+            cols: the number of console columns
+            settings: a settings object, containing customizable user settings
+            vsync: whether to run in vsync or not
+        """
+        self._vsync: bool = vsync
+        self._title: str = title
+        self._tileset: Tileset = tileset
+        self._rows: int = rows
+        self._cols: int = cols
+        self._settings: Settings = settings
+        self._context: tcod.context.Context | None = None
 
-    def _configure_services(self) -> None:
-        if self._title is None: raise Exception("Title must be set.")
-        if self._tileset is None: raise Exception("Tileset must be set.")
-        if self._height is None: raise Exception("Height must be set.")
-        if self._width is None: raise Exception("Width must be set.")
-        if self._settings is None: raise Exception("Settings must be set.")
-
+    def _setup(self) -> None:
+        """
+        Setup critical services and dependencies for DI.
+        """
+        self._context = tcod.context.new_terminal(
+            self._cols,
+            self._rows,
+            tileset=self._tileset,
+            title=self._title,
+            vsync=self._vsync)
+        self._root_console = tcod.console.Console(self._cols, self._rows, order="F")
         self._event_handler = EventHandler(self._settings)
+        self._world = World(self._rows, self._cols)
+        self._engine = Engine(self._event_handler, self._world)
 
     def run(self) -> None:
-
-        self._configure_services()
-
-        player_x = int(self._width / 2)
-        player_y = int(self._height / 2)
-
-        with tcod.context.new_terminal(
-                self._width,
-                self._height,
-                tileset=self._tileset,
-                title=self._title,
-                vsync=self._vsync
-        ) as context:
-            root_console = tcod.console.Console(self._width, self._height, order="F")
-            while True:
-                root_console.print(x=player_x, y=player_y, string="@")
-                context.present(root_console)
-
-                root_console.clear()
-
-                for event in tcod.event.wait():
-                    action = self._event_handler.dispatch(event)
-
-                    if action is None:
-                        continue
-
-                    if isinstance(action, MoveAction):
-                        player_x += action.dx
-                        player_y += action.dy
-
-                    elif isinstance(action, QuitAction):
-                        raise SystemExit()
-
-    def stop(self) -> None:
-        raise SystemExit
-
-    def set_screen_size(self, width: int, height: int) -> Game:
-        self._width = width
-        self._height = height
-        return self
-
-    def set_tileset(self, tileset: Tileset) -> Game:
-        self._tileset = tileset
-        return self
-
-    def set_title(self, title: str) -> Game:
-        self._title = title
-        return self
-
-    def use_vsync(self) -> Game:
-        self._vsync = True
-        return self
-
-    def load_settings(self, path: str) -> Game:
-        self._settings = Settings(path)
-        return self
+        """
+        Run the game. Will exit if engine returns false on handle events.
+        """
+        self._setup()
+        running = True
+        while running:
+            self._engine.render(console=self._root_console, context=self._context)
+            events = tcod.event.wait()
+            running = self._engine.handle_events(events)
+        self._context.close()
+        raise SystemExit()
